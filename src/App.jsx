@@ -570,6 +570,44 @@ function _humanizeENBOChange(curr, sugg, lang="es", highDialMeansCoarser=true){
   return msgs;
 }
 function suggestElasticNetBO(history, ranges, currParams){
+
+// Fallback when not enough history or no feasible EI found
+function suggestElasticNetBOFallbackBeta(ranges, currParams){
+  const TDS_LO=8, TDS_HI=12, EY_LO=18, EY_HI=22;
+  const temp = Number(currParams?.temp ?? 93);
+  const bev  = Number(currParams?.beverageMass ?? ((currParams?.doseCoffee||18)*2.0));
+  const clamp = (v, lo, hi)=> Math.min(hi, Math.max(lo, v));
+
+  let best=null; let bestScore=-Infinity;
+  const Gmin=ranges.grindSize.min, Gmax=ranges.grindSize.max;
+  const Dmin=ranges.doseCoffee.min, Dmax=ranges.doseCoffee.max;
+  const Tmin=ranges.time.min,      Tmax=ranges.time.max;
+  const Pmin=ranges.tampPressure.min, Pmax=ranges.tampPressure.max;
+
+  // Coarse grid
+  for (let g=Gmin; g<=Gmax; g+= (Gmax-Gmin)/10 ){
+    for (let d=Dmin; d<=Dmax; d+= 0.3){
+      for (let t=Tmin; t<=Tmax; t+= 1.5){
+        for (let p=Pmin; p<=Pmax; p+= 1){
+          const params = { grindSize:g, doseCoffee:d, beverageMass:bev, time:t, temp, tampPressure:p };
+          const r = d>0 ? bev/d : null;
+          const EY = estimateEY(params, currParams?.extras || {}, r);
+          const TDS = estimateTDS(params, EY);
+          if (EY>=EY_LO && EY<=EY_HI && TDS>=TDS_LO && TDS<=TDS_HI){
+            // Preference: max EY (within band) and closeness to mid (20,10)
+            const score = EY - 0.2*Math.pow((EY-20)/2,2) - 0.2*Math.pow((TDS-10)/2,2);
+            if (score > bestScore){
+              bestScore = score;
+              best = { grindSize: g, doseCoffee: d, time: t, tampPressure: p };
+            }
+          }
+        }
+      }
+    }
+  }
+  return { suggestion: best, info: { fallback: true, reason: "not_enough_history_or_no_feasible_ei" } };
+}
+
   const TDS_LO=8, TDS_HI=12, EY_LO=18, EY_HI=22;
   function feasibleWithCurrentBev(candidate){
     const p = {
@@ -1101,7 +1139,8 @@ const onAnalyze = () => {
 const onGenerateBO = () => {
     setBoBusy(true);
     try {
-      const { suggestion: s, info } = suggestElasticNetBO(history, ranges, params);
+      let { suggestion: s, info } = suggestElasticNetBO(history, ranges, params);
+      if (!s) { const fb = suggestElasticNetBOFallbackBeta(ranges, params); s = fb.suggestion; info = { ...(info||{}), ...(fb.info||{}) }; }
       setBoSuggestion(s);
       setBoInfo(info);
     } catch (e) {
@@ -1482,7 +1521,7 @@ const onGenerateBO = () => {
               </p>
 <button
                 onClick={onGenerateBO}
-                disabled={boBusy || history.length < 3}
+                disabled={boBusy}
                 className="px-3 py-1.5 rounded bg-amber-400 text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed">
                 {boBusy ? (lang==="es"?"Calculando…":"Computing…") : (lang==="es"?"Proponer con Elastic Net + BO":"Suggest with Elastic Net + BO")}
               </button>
