@@ -1,0 +1,13 @@
+{
+  "servers": [
+    {
+      "name": "example-1",
+      "url": "https://speed.hetzner.de/100MB.bin",
+      "announce_url": "https://example.com/announce"
+    },
+    {
+      "name": "example-2",
+      "url": "https://speed.hetzner.de/1GB.bin"
+    }
+  ]
+}
