@@ -39,10 +39,12 @@ class CooldownEntry:
 
 
 class ServerPool:
-    def __init__(self, servers: Iterable[ServerTarget]) -> None:
+    def __init__(self, servers: Iterable[ServerTarget], max_consecutive_errors: int) -> None:
         self._servers = list(servers)
         self._cooldowns: dict[str, CooldownEntry] = {}
+        self._errors: dict[str, int] = {}
         self._index = 0
+        self._max_consecutive_errors = max(1, max_consecutive_errors)
 
     def _is_available(self, server: ServerTarget, now: float) -> bool:
         entry = self._cooldowns.get(server.name)
@@ -54,6 +56,14 @@ class ServerPool:
         self._cooldowns[server.name] = CooldownEntry(
             until=time.monotonic() + seconds, reason=reason
         )
+        self._errors[server.name] = 0
+
+    def record_error(self, server: ServerTarget) -> bool:
+        self._errors[server.name] = self._errors.get(server.name, 0) + 1
+        return self._errors[server.name] >= self._max_consecutive_errors
+
+    def record_success(self, server: ServerTarget) -> None:
+        self._errors[server.name] = 0
 
     def next(self) -> ServerTarget | None:
         if not self._servers:
@@ -169,6 +179,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cooldown for busy servers in seconds.",
     )
     parser.add_argument(
+        "--max-consecutive-errors",
+        type=int,
+        default=2,
+        help="Consecutive errors before putting a server on cooldown.",
+    )
+    parser.add_argument(
+        "--busy-statuses",
+        type=str,
+        default="429,503,504",
+        help="Comma-separated HTTP status codes treated as busy.",
+    )
+    parser.add_argument(
         "--client-id",
         type=str,
         default="network-probe",
@@ -182,8 +204,13 @@ async def run_probe(args: argparse.Namespace) -> None:
     if not servers:
         raise SystemExit("No servers configured.")
 
-    pool = ServerPool(servers)
+    pool = ServerPool(servers, args.max_consecutive_errors)
     end_time = time.monotonic() + args.duration_hours * 3600
+    busy_statuses = {
+        int(code.strip())
+        for code in args.busy_statuses.split(",")
+        if code.strip().isdigit()
+    }
 
     async with aiohttp.ClientSession() as session:
         while time.monotonic() < end_time:
@@ -209,12 +236,19 @@ async def run_probe(args: argparse.Namespace) -> None:
                     f"{server.name}: target={target_mbps:.2f} Mbps, "
                     f"received={mbps:.2f} Mbps ({bytes_received} bytes)"
                 )
+                pool.record_success(server)
             except aiohttp.ClientResponseError as exc:
-                pool.mark_busy(server, args.cooldown_seconds, str(exc.status))
-                print(f"{server.name}: busy (HTTP {exc.status}), cooling down")
+                if exc.status in busy_statuses or pool.record_error(server):
+                    pool.mark_busy(server, args.cooldown_seconds, str(exc.status))
+                    print(f"{server.name}: busy (HTTP {exc.status}), cooling down")
+                else:
+                    print(f"{server.name}: HTTP {exc.status}, switching server")
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-                pool.mark_busy(server, args.cooldown_seconds, str(exc))
-                print(f"{server.name}: error ({exc}), cooling down")
+                if pool.record_error(server):
+                    pool.mark_busy(server, args.cooldown_seconds, str(exc))
+                    print(f"{server.name}: error ({exc}), cooling down")
+                else:
+                    print(f"{server.name}: error ({exc}), switching server")
 
 
 def main() -> None:
@@ -224,6 +258,8 @@ def main() -> None:
         raise SystemExit("Mbps values must be positive.")
     if args.min_mbps > args.max_mbps:
         raise SystemExit("min-mbps must be <= max-mbps.")
+    if args.max_consecutive_errors < 1:
+        raise SystemExit("max-consecutive-errors must be >= 1.")
 
     try:
         asyncio.run(run_probe(args))
