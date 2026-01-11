@@ -124,8 +124,24 @@ async def download_with_rate(
     return total_bytes, duration
 
 
+def resolve_servers_path(path: Path) -> Path:
+    if path.exists():
+        return path
+    if not path.is_absolute():
+        fallback = Path(__file__).resolve().parent / path
+        if fallback.exists():
+            return fallback
+    return path
+
+
 def load_servers(path: Path) -> list[ServerTarget]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    resolved_path = resolve_servers_path(path)
+    if not resolved_path.exists():
+        raise SystemExit(
+            "Server list not found. Provide a valid --servers path or place the file "
+            f"next to this script. Missing: {path}"
+        )
+    data = json.loads(resolved_path.read_text(encoding="utf-8"))
     servers = []
     for entry in data.get("servers", []):
         servers.append(
@@ -145,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--servers",
         type=Path,
-        required=True,
+        default=Path("servers.example.json"),
         help="Path to JSON file with server definitions.",
     )
     parser.add_argument(
