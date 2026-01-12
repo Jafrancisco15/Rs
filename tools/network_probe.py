@@ -100,27 +100,44 @@ async def download_with_rate(
     chunk_min: int,
     chunk_max: int,
     request_timeout: int,
+    parallel_downloads: int,
+    no_throttle: bool,
 ) -> tuple[int, float]:
-    bytes_target_per_sec = target_mbps * 1_000_000 / 8
-    total_bytes = 0
-    start = time.monotonic()
-    timeout = aiohttp.ClientTimeout(total=request_timeout)
-    async with session.get(server.url, timeout=timeout) as resp:
-        resp.raise_for_status()
-        async for chunk in resp.content.iter_chunked(
-            random.randint(chunk_min, chunk_max)
-        ):
-            if not chunk:
-                break
-            total_bytes += len(chunk)
-            elapsed = time.monotonic() - start
-            expected_bytes = bytes_target_per_sec * elapsed
-            if total_bytes > expected_bytes:
-                sleep_for = (total_bytes - expected_bytes) / bytes_target_per_sec
-                await asyncio.sleep(sleep_for)
-            if elapsed > request_timeout:
-                break
-    duration = max(time.monotonic() - start, 0.001)
+    async def run_stream(rate_mbps: float | None) -> tuple[int, float]:
+        bytes_target_per_sec = None
+        if rate_mbps:
+            bytes_target_per_sec = rate_mbps * 1_000_000 / 8
+        total_bytes = 0
+        start = time.monotonic()
+        timeout = aiohttp.ClientTimeout(total=request_timeout)
+        async with session.get(server.url, timeout=timeout) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.content.iter_chunked(
+                random.randint(chunk_min, chunk_max)
+            ):
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if bytes_target_per_sec:
+                    elapsed = time.monotonic() - start
+                    expected_bytes = bytes_target_per_sec * elapsed
+                    if total_bytes > expected_bytes:
+                        sleep_for = (total_bytes - expected_bytes) / bytes_target_per_sec
+                        await asyncio.sleep(sleep_for)
+                if time.monotonic() - start > request_timeout:
+                    break
+        duration = max(time.monotonic() - start, 0.001)
+        return total_bytes, duration
+
+    parallel_downloads = max(1, parallel_downloads)
+    per_stream_rate = None
+    if not no_throttle:
+        per_stream_rate = target_mbps / parallel_downloads
+    results = await asyncio.gather(
+        *[run_stream(per_stream_rate) for _ in range(parallel_downloads)]
+    )
+    total_bytes = sum(bytes_count for bytes_count, _ in results)
+    duration = max(duration for _, duration in results)
     return total_bytes, duration
 
 
@@ -189,6 +206,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Timeout per download request in seconds.",
     )
     parser.add_argument(
+        "--parallel-downloads",
+        type=int,
+        default=3,
+        help="Number of parallel downloads per server to increase demand.",
+    )
+    parser.add_argument(
+        "--no-throttle",
+        action="store_true",
+        help="Disable rate throttling to download at full speed.",
+    )
+    parser.add_argument(
         "--cooldown-seconds",
         type=int,
         default=300,
@@ -246,6 +274,8 @@ async def run_probe(args: argparse.Namespace) -> None:
                     DEFAULT_MIN_CHUNK,
                     DEFAULT_MAX_CHUNK,
                     args.request_timeout,
+                    args.parallel_downloads,
+                    args.no_throttle,
                 )
                 mbps = (bytes_received * 8) / (duration * 1_000_000)
                 print(
@@ -276,6 +306,8 @@ def main() -> None:
         raise SystemExit("min-mbps must be <= max-mbps.")
     if args.max_consecutive_errors < 1:
         raise SystemExit("max-consecutive-errors must be >= 1.")
+    if args.parallel_downloads < 1:
+        raise SystemExit("parallel-downloads must be >= 1.")
 
     try:
         asyncio.run(run_probe(args))

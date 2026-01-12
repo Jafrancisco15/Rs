@@ -40,6 +40,14 @@
     {
       "name": "googlefiber",
       "url": "https://speedtest.ato1.googlefiber.net/100mb.bin"
+    },
+    {
+      "name": "leaseweb-1gb",
+      "url": "https://speedtest.leaseweb.net/1000MB.bin"
+    },
+    {
+      "name": "cachefly-100mb",
+      "url": "https://cachefly.cachefly.net/100mb.test"
     }
   ]
 }

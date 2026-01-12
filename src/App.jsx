@@ -8,6 +8,8 @@ const OPTIONS = [
   { name: "--request-timeout", desc: "Timeout por descarga en segundos." },
   { name: "--cooldown-seconds", desc: "Tiempo de enfriamiento al marcar un servidor como ocupado." },
   { name: "--client-id", desc: "Identificador del cliente para anunciar la velocidad." },
+  { name: "--parallel-downloads", desc: "Descargas paralelas por servidor para subir la demanda." },
+  { name: "--no-throttle", desc: "Desactiva el límite de velocidad para descargar al máximo." },
   { name: "--max-consecutive-errors", desc: "Errores consecutivos antes de poner el servidor en cooldown." },
   { name: "--busy-statuses", desc: "Códigos HTTP que se consideran ocupados (coma separada)." }
 ];
@@ -27,7 +29,9 @@ const SERVERS = [
   "speedtest.ams01.softlayer.com",
   "speedtest.wdc01.softlayer.com",
   "speedtest.sng01.softlayer.com",
-  "speedtest.ato1.googlefiber.net"
+  "speedtest.ato1.googlefiber.net",
+  "speedtest.leaseweb.net",
+  "cachefly.cachefly.net"
 ];
 
 export default function App() {
