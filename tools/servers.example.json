@@ -1,0 +1,53 @@
+{
+  "servers": [
+    {
+      "name": "hetzner-100mb",
+      "url": "https://speed.hetzner.de/100MB.bin",
+      "announce_url": "https://example.com/announce"
+    },
+    {
+      "name": "hetzner-1gb",
+      "url": "https://speed.hetzner.de/1GB.bin"
+    },
+    {
+      "name": "tele2-100mb",
+      "url": "https://speedtest.tele2.net/100MB.zip"
+    },
+    {
+      "name": "tele2-1gb",
+      "url": "https://speedtest.tele2.net/1GB.zip"
+    },
+    {
+      "name": "thinkbroadband-200mb",
+      "url": "https://ipv4.download.thinkbroadband.com/200MB.zip"
+    },
+    {
+      "name": "ovh-1gb",
+      "url": "https://proof.ovh.net/files/1Gb.dat"
+    },
+    {
+      "name": "softlayer-ams",
+      "url": "https://speedtest.ams01.softlayer.com/downloads/test10.zip"
+    },
+    {
+      "name": "softlayer-wdc",
+      "url": "https://speedtest.wdc01.softlayer.com/downloads/test10.zip"
+    },
+    {
+      "name": "softlayer-sng",
+      "url": "https://speedtest.sng01.softlayer.com/downloads/test10.zip"
+    },
+    {
+      "name": "googlefiber",
+      "url": "https://speedtest.ato1.googlefiber.net/100mb.bin"
+    },
+    {
+      "name": "leaseweb-1gb",
+      "url": "https://speedtest.leaseweb.net/1000MB.bin"
+    },
+    {
+      "name": "cachefly-100mb",
+      "url": "https://cachefly.cachefly.net/100mb.test"
+    }
+  ]
+}
