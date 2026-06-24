@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -332,6 +332,8 @@ const DEFAULT_SHOT_CSV = `time,weight
 27,39.0
 30,44.4`;
 
+const samplesToCsv = (samples) => `time,weight\n${samples.map((sample) => `${sample.t},${sample.weight}`).join("\n")}`;
+
 const DEFAULT_ZONE_CSV = `segment,label,progress,min,max
 low,Perfil bajo,0,1.2,1.9
 low,Perfil bajo,0.5,1.5,2.1
@@ -351,10 +353,70 @@ function MetricCard({ label, value, suffix = "" }) {
 
 export default function App() {
   const [shotCsv, setShotCsv] = useState(DEFAULT_SHOT_CSV);
+  const [connectionStatus, setConnectionStatus] = useState("Desconectada");
+  const [tareOffset, setTareOffset] = useState(0);
+  const [manualTime, setManualTime] = useState(33);
+  const [manualWeight, setManualWeight] = useState(48);
+  const [simulating, setSimulating] = useState(false);
+  const [simulationStart, setSimulationStart] = useState(null);
   const [zoneCsv, setZoneCsv] = useState(DEFAULT_ZONE_CSV);
   const samples = useMemo(() => parseShotCsv(shotCsv), [shotCsv]);
   const zoneSegments = useMemo(() => parseZoneCsv(zoneCsv), [zoneCsv]);
   const analysis = useMemo(() => analyzeShot(samples, zoneSegments), [samples, zoneSegments]);
+  const currentWeight = samples.length ? samples[samples.length - 1].weight - tareOffset : 0;
+
+  useEffect(() => {
+    if (!simulating) return undefined;
+    const start = Date.now();
+    setSimulationStart(start);
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - start) / 1000;
+      const flow = elapsed < 5 ? 0 : Math.max(0.4, 2.8 - elapsed * 0.018 + Math.sin(elapsed / 2) * 0.25);
+      setShotCsv((previousCsv) => {
+        const previous = parseShotCsv(previousCsv);
+        const lastWeight = previous.length ? previous[previous.length - 1].weight : 0;
+        const lastTime = previous.length ? previous[previous.length - 1].t : 0;
+        if (elapsed <= lastTime) return previousCsv;
+        const dt = Math.max(0, elapsed - lastTime);
+        const next = [...previous, { t: Number(elapsed.toFixed(1)), weight: Number((lastWeight + flow * dt).toFixed(1)) }];
+        return samplesToCsv(next);
+      });
+      if (elapsed >= 32) setSimulating(false);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [simulating]);
+
+  const connectBluetoothScale = async () => {
+    if (!navigator.bluetooth) {
+      setConnectionStatus("Bluetooth no disponible; usa entrada manual o simulación.");
+      return;
+    }
+    setConnectionStatus("Buscando balanza Bluetooth...");
+    try {
+      const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ["battery_service"] });
+      setConnectionStatus(`Conectada a ${device.name || "balanza Bluetooth"}`);
+    } catch (error) {
+      setConnectionStatus("Conexión cancelada o no disponible; usa entrada manual o simulación.");
+    }
+  };
+
+  const tareScale = () => {
+    setTareOffset(samples.length ? samples[samples.length - 1].weight : 0);
+  };
+
+  const addManualSample = () => {
+    const next = [...samples, { t: Number(manualTime), weight: Number(manualWeight) + tareOffset }]
+      .filter((sample) => Number.isFinite(sample.t) && Number.isFinite(sample.weight))
+      .sort((a, b) => a.t - b.t);
+    setShotCsv(samplesToCsv(next));
+    setManualTime((value) => Number(value) + 3);
+  };
+
+  const resetShot = () => {
+    setShotCsv("time,weight\n0,0");
+    setTareOffset(0);
+    setSimulating(false);
+  };
 
   const exportAnalysis = () => {
     if (analysis.error) return;
@@ -381,18 +443,55 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100">
+    <div className="min-h-screen bg-gradient-to-br from-stone-950 via-stone-900 to-amber-950 text-stone-100">
       <header className="border-b border-amber-900/30 px-6 py-8">
-        <div className="mx-auto max-w-6xl">
-          <p className="text-sm text-amber-200/80">Espresso Flow Analyzer</p>
-          <h1 className="text-3xl font-bold">Análisis de curva de flujo por balanza</h1>
-          <p className="mt-3 max-w-3xl text-stone-300">
-            La app analiza la curva de flujo medida por balanza, compara el tiro contra una zona de referencia y estima uniformidad, salida fuera de zona y patrones compatibles con canalización o degradación del puck.
-          </p>
+        <div className="mx-auto flex max-w-6xl flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-sm text-amber-200/80">Espresso Dial In · Balanza Bluetooth</p>
+            <h1 className="text-4xl font-bold">Análisis de curva de flujo por balanza</h1>
+            <p className="mt-3 max-w-3xl text-stone-300">
+              La app conserva la captura de peso, tiempo y flujo calculado: conecta una balanza Bluetooth, haz tara, introduce datos manualmente o corre una simulación sin agregar sensores externos.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-amber-800/40 bg-stone-950/70 p-4 shadow-xl">
+            <div className="text-xs uppercase tracking-wide text-amber-200/70">Peso actual</div>
+            <div className="text-4xl font-bold">{currentWeight.toFixed(1)} g</div>
+            <div className="mt-1 text-xs text-stone-400">{connectionStatus}</div>
+          </div>
         </div>
       </header>
 
       <main className="mx-auto grid max-w-6xl gap-6 px-6 py-8">
+        <section className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-xl border border-amber-900/30 bg-stone-900/70 p-5">
+            <h2 className="text-xl font-semibold">Conexión de balanza</h2>
+            <p className="mt-2 text-sm text-stone-300">Web Bluetooth se usa cuando el navegador lo permite; si no, la entrada manual y la simulación siguen disponibles.</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-stone-950" onClick={connectBluetoothScale}>Conectar Bluetooth</button>
+              <button className="rounded-lg border border-amber-700 px-3 py-2 text-sm" onClick={tareScale}>Tara</button>
+              <button className="rounded-lg border border-stone-700 px-3 py-2 text-sm" onClick={resetShot}>Reiniciar tiro</button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-900/30 bg-stone-900/70 p-5">
+            <h2 className="text-xl font-semibold">Introducir datos</h2>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <label className="grid gap-1 text-sm">Tiempo (s)<input className="rounded-lg border border-stone-700 bg-stone-950 p-2" type="number" value={manualTime} onChange={(event) => setManualTime(event.target.value)} /></label>
+              <label className="grid gap-1 text-sm">Peso neto (g)<input className="rounded-lg border border-stone-700 bg-stone-950 p-2" type="number" value={manualWeight} onChange={(event) => setManualWeight(event.target.value)} /></label>
+            </div>
+            <button className="mt-3 rounded-lg bg-stone-100 px-3 py-2 text-sm font-semibold text-stone-950" onClick={addManualSample}>Agregar muestra</button>
+          </div>
+
+          <div className="rounded-xl border border-amber-900/30 bg-stone-900/70 p-5">
+            <h2 className="text-xl font-semibold">Simulación</h2>
+            <p className="mt-2 text-sm text-stone-300">Genera una curva de extracción para probar gráficos, zona segura y diagnósticos sin balanza conectada.</p>
+            <button className="mt-4 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-stone-950" onClick={() => { resetShot(); setSimulating(true); }}>
+              {simulating ? "Simulando..." : "Iniciar simulación"}
+            </button>
+            {simulationStart && <p className="mt-2 text-xs text-stone-400">Simulación activa desde {new Date(simulationStart).toLocaleTimeString()}.</p>}
+          </div>
+        </section>
+
         <section className="grid gap-4 lg:grid-cols-2">
           <label className="grid gap-2">
             <span className="font-semibold">Datos de balanza (tiempo, peso)</span>
